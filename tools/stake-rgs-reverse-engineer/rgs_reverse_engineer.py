@@ -236,7 +236,8 @@ def cmd_design(args) -> None:
     paytable = [float(x) for x in args.paytable.split(",")]
     rows, achieved = core.design_weights(
         paytable=paytable, target_rtp=args.rtp, target_hit_rate=args.hit,
-        cost=args.cost, decay=args.decay, scale=args.scale)
+        cost=args.cost, decay=args.decay, scale=args.scale,
+        granularity=args.granularity)
     print(f"\n=== Designed weight table (target RTP {args.rtp*100:.2f}%, "
           f"hit {args.hit*100:.2f}%) ===")
     print_analysis(args.name, achieved)
@@ -325,6 +326,9 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--cost", type=float, default=1.0)
     d.add_argument("--decay", type=float, default=0.35,
                    help="geometric rarity decay across prize tiers (default 0.35)")
+    d.add_argument("--granularity", type=int, default=10_000_000,
+                   help="integer-weight resolution; raise for exact tail RTP "
+                        "(default 10,000,000)")
     d.add_argument("--name", default="designed")
     d.add_argument("--out-lookup"); d.add_argument("--out-books")
     d.set_defaults(func=cmd_design)
