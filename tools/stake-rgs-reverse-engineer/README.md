@@ -140,6 +140,43 @@ points — a CI-friendly math sign-off check.
 | `rgs_core.py` | Loaders, exact math, weighted RGS simulator, reverse inference, weight design |
 | `synth_slot.py` | Synthetic reel/paytable slot → Stake-format artifacts → round-trip demo |
 
+## Getting the real math out of a slot
+
+"The math" of a Stake Engine game = its `books_*.jsonl(.zst)` + `lookUpTable_*.csv`
++ `index.json`. How exactly you can obtain it depends on the game:
+
+1. **Open-source Stake Engine games — exact, fully legitimate.** The math engine is
+   open ([StakeEngine/math-sdk](https://github.com/StakeEngine/math-sdk)). Sample
+   games ship their real reel strips, paytables, and game logic; the `library/`
+   output is git-ignored only because it is *generated*. Regenerate it and analyse:
+   ```bash
+   git clone https://github.com/StakeEngine/math-sdk
+   cd math-sdk && make setup && make run GAME=0_0_lines   # needs Python 3.12 + Rust
+   python3 rgs_reverse_engineer.py analyze \
+       --index games/0_0_lines/library/publish_files/index.json
+   ```
+   This tool has been validated end-to-end against exactly this output: it reads the
+   official `index.json` / `lookUpTable_*.csv` unchanged and reports the game's
+   declared RTP (e.g. `0_0_lines` → **96.7000%**, both `base` and the 100× `bonus`
+   mode, 5000× wincap) to the digit. Real optimised weights are large integers
+   (e.g. `99910483480`); the loader handles them natively.
+
+2. **Your own recorded play / replay data — statistical recovery.** For a closed
+   commercial game the weight table is not published, but you can reconstruct the
+   distribution from a large sample of rounds you are authorised to collect (each
+   Stake Engine round is individually replayable), then feed the multipliers to
+   `reverse`. Accuracy scales as ~1/√n.
+
+3. **Published specs — reconstruction.** Match headline RTP / max win / volatility
+   with `design` when neither the files nor a play sample are available. Lowest
+   fidelity, always available. (See `examples/waylanders_forge.sh`.)
+
+What this tool does **not** do: rip a specific studio's proprietary book/weight
+files off Stake's RGS/CDN. Even though the client streams one book per bet, the RGS
+never hands out the weight table, and extracting/redistributing another studio's
+math is an IP/ToS matter. Use open-source math, your own authorised play data, or
+published specs.
+
 ## Disclaimer
 
 For math analysis, QA, and reproducing a game's declared math from its own
