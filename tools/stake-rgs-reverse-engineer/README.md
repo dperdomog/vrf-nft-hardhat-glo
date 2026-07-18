@@ -110,6 +110,37 @@ Distributes winning mass across the paytable so that **both** the target RTP and
 the target hit-rate are met exactly (the tier tilt is solved by bisection). Reports
 if the targets are infeasible for the given paytable.
 
+### `build` — make a full custom multi-mode game
+
+Author any number of custom modes in a JSON spec — each with its own bet cost,
+target RTP, hit-rate, and paytable (which sets the volatility/max-win) — and it
+generates a complete Stake-format package: per-mode `lookUpTable_*.csv` +
+`books_*.jsonl`, an `index.json`, and a `math_spec.json`.
+
+```bash
+python3 rgs_reverse_engineer.py build my_game.json --out-dir my_game/
+python3 rgs_reverse_engineer.py analyze --index my_game/index.json
+```
+
+`my_game.json`:
+```json
+{
+  "game": "dragon-forge-custom",
+  "modes": [
+    {"name": "base",      "cost": 1.0,   "rtp": 0.965, "hit": 0.20,
+     "paytable": [0.5,1,2,5,20,100,500,2000,10000,50000]},
+    {"name": "bonus_buy", "cost": 100.0, "rtp": 0.97,  "hit": 0.995,
+     "paytable": [5,20,50,100,250,500,1000,2500,10000,50000]},
+    {"name": "super_buy", "cost": 500.0, "rtp": 0.975, "hit": 1.0, "decay": 0.5,
+     "paytable": [50,100,250,500,1000,2500,5000,25000,100000]}
+  ]
+}
+```
+
+Each mode hits its target RTP and hit-rate exactly; `hit: 1.0` means an always-paying
+bought feature (no loss outcome). See `examples/custom_game.json`. The result is a
+real game you can `analyze`, `simulate`, `verify`, and `replicate` like any other.
+
 ### `verify` — theoretical vs simulated RTP gate
 
 ```bash

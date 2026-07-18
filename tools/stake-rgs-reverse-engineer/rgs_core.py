@@ -479,8 +479,8 @@ def design_weights(paytable: Sequence[float], target_rtp: float,
     prizes = sorted({float(p) for p in paytable if p > 0})
     if not prizes:
         raise ValueError("paytable must contain at least one positive multiplier.")
-    if not (0 < target_hit_rate < 1):
-        raise ValueError("target_hit_rate must be in (0,1).")
+    if not (0 < target_hit_rate <= 1):
+        raise ValueError("target_hit_rate must be in (0,1].")
 
     lo_rtp = target_hit_rate * prizes[0] / cost
     hi_rtp = target_hit_rate * prizes[-1] / cost
@@ -513,8 +513,9 @@ def design_weights(paytable: Sequence[float], target_rtp: float,
     # quantise probabilities to integer weights.
     rows: List[WeightRow] = []
     loss_prob = 1.0 - sum(tier_prob)
-    rows.append(WeightRow(id=1, weight=max(int(round(loss_prob * granularity)), 1),
-                          payout_raw=0, payout=0.0))
+    if loss_prob * granularity >= 0.5:   # omit the loss outcome when hit-rate == 1
+        rows.append(WeightRow(id=1, weight=int(round(loss_prob * granularity)),
+                              payout_raw=0, payout=0.0))
     for i, (prize, pr) in enumerate(zip(prizes, tier_prob), start=2):
         w = max(int(round(pr * granularity)), 1)
         raw = int(round(prize * scale))

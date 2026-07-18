@@ -1,0 +1,15 @@
+{
+  "game": "dragon-forge-custom",
+  "modes": [
+    {"name": "base_low_vol",  "cost": 1.0,   "rtp": 0.94,  "hit": 0.42,
+     "paytable": [0.25,0.5,1,2,5,10,25,50,100,250,500]},
+    {"name": "base_high_vol", "cost": 1.0,   "rtp": 0.965, "hit": 0.20,
+     "paytable": [0.5,1,2,5,20,100,500,2000,10000,50000]},
+    {"name": "bonus_buy",     "cost": 100.0, "rtp": 0.97,  "hit": 0.995,
+     "paytable": [5,20,50,100,250,500,1000,2500,10000,50000]},
+    {"name": "super_buy",     "cost": 500.0, "rtp": 0.975, "hit": 1.0,
+     "paytable": [50,100,250,500,1000,2500,5000,25000,100000], "decay": 0.5},
+    {"name": "turbo_spin",    "cost": 20.0,  "rtp": 0.96,  "hit": 0.60,
+     "paytable": [1,2,5,10,25,50,100,500,2000]}
+  ]
+}

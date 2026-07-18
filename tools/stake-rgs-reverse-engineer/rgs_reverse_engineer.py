@@ -16,6 +16,7 @@ Subcommands
   replicate   Read a game and emit a portable math-spec JSON + a regenerated
               lookUpTable that reproduces it (round-trippable clone).
   design      Build a lookUpTable that hits a target RTP / hit-rate from a paytable.
+  build       Assemble a full custom multi-mode game from a JSON mode spec.
   demo        Generate a synthetic Stake game, then analyze + reverse it end-to-end.
   verify      Prove the theoretical math matches simulated spins within tolerance.
 
@@ -263,6 +264,47 @@ def cmd_design(args) -> None:
         print(f"  books stub  -> {args.out_books}")
 
 
+def cmd_build(args) -> None:
+    """Build a complete multi-mode Stake-format game from a JSON mode spec.
+
+    Spec: {"game": "...", "modes": [
+             {"name","cost","rtp","hit","paytable":[...],
+              "decay"?, "granularity"?}, ...]}"""
+    with open(args.spec, encoding="utf-8") as fh:
+        spec = json.load(fh)
+    game = spec.get("game", "custom-game")
+    outdir = args.out_dir
+    os.makedirs(outdir, exist_ok=True)
+
+    index_modes, math_spec = [], {}
+    print(f"\n=== Building game {game!r} -> {outdir}/ ===")
+    for md in spec["modes"]:
+        name = md["name"]
+        cost = float(md.get("cost", 1.0))
+        rows, achieved = core.design_weights(
+            paytable=[float(x) for x in md["paytable"]],
+            target_rtp=float(md["rtp"]), target_hit_rate=float(md["hit"]),
+            cost=cost, decay=float(md.get("decay", 0.35)), scale=args.scale,
+            granularity=int(md.get("granularity", 100_000_000_000)))
+        lp = os.path.join(outdir, f"lookUpTable_{name}.csv")
+        bp = os.path.join(outdir, f"books_{name}.jsonl")
+        core.write_lookup(rows, lp)
+        core.write_books_stub(rows, bp, args.scale)
+        index_modes.append({"name": name, "cost": cost,
+                            "events": os.path.basename(bp),
+                            "weights": os.path.basename(lp)})
+        math_spec[name] = achieved
+        print(f"  mode {name:<14} cost {cost:>7.1f}x  RTP {achieved['rtp_pct']:.4f}%  "
+              f"hit {achieved['hit_rate_any']*100:6.2f}%  vol(CoV) "
+              f"{achieved['coeff_of_variation']:6.2f}  max {achieved['max_multiplier']:,.0f}x")
+    with open(os.path.join(outdir, "index.json"), "w", encoding="utf-8") as fh:
+        json.dump({"game": game, "modes": index_modes}, fh, indent=2)
+    core.write_math_spec(math_spec, os.path.join(outdir, "math_spec.json"))
+    print(f"\n  wrote index.json, math_spec.json, and {len(index_modes)} "
+          f"lookUpTable/books pairs.")
+    print(f"  analyse it with:  analyze --index {outdir}/index.json")
+
+
 def cmd_verify(args) -> None:
     modes = resolve_modes(args)
     m = modes[0]
@@ -346,6 +388,11 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--name", default="designed")
     d.add_argument("--out-lookup"); d.add_argument("--out-books")
     d.set_defaults(func=cmd_design)
+
+    b = sub.add_parser("build", help="build a multi-mode game from a JSON mode spec")
+    b.add_argument("spec", help="JSON file: {game, modes:[{name,cost,rtp,hit,paytable}]}")
+    b.add_argument("--out-dir", default="custom_game")
+    b.set_defaults(func=cmd_build)
 
     v = sub.add_parser("verify", help="theoretical vs simulated RTP within tolerance")
     add_source(v)
