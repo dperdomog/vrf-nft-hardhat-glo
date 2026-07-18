@@ -111,8 +111,20 @@ def cmd_simulate(args) -> None:
     modes = resolve_modes(args)
     m = modes[0]
     sim = core.RgsSimulator(m.weights, m.cost)
-    session = sim.run(args.spins, seed=args.seed)
-    s = session.metrics()
+    session = None
+    if args.out:
+        # per-spin log requested -> must store spins (O(n) memory).
+        session = sim.run(args.spins, seed=args.seed)
+        s = session.metrics()
+    else:
+        # streaming: O(1) memory, scales to hundreds of millions of spins.
+        def _prog(i, total, total_sq, hits, mx):
+            rtp = (total / i) / m.cost * 100.0
+            print(f"    ... {i:,}/{args.spins:,} spins   running RTP {rtp:.4f}%",
+                  file=sys.stderr)
+        step = max(args.spins // 10, 1) if args.progress else 0
+        s = sim.run_stream(args.spins, seed=args.seed,
+                           progress_every=step, on_progress=_prog)
     print(f"\n=== Simulated session: mode {m.name!r} | {args.spins:,} spins "
           f"| seed {args.seed} ===")
     print(f"  total bet           : {s['total_bet']:,.2f}")
@@ -303,7 +315,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_source(s)
     s.add_argument("--spins", type=int, default=100000)
     s.add_argument("--seed", type=int, default=None)
-    s.add_argument("--out", help="write per-spin CSV log here")
+    s.add_argument("--out", help="write per-spin CSV log here (forces O(n) memory)")
+    s.add_argument("--progress", action="store_true",
+                   help="print running RTP every 10%% (streaming mode)")
     s.set_defaults(func=cmd_simulate)
 
     r = sub.add_parser("reverse", help="rebuild math from observed outcomes")

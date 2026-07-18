@@ -335,6 +335,8 @@ class RgsSimulator:
 
     # ---- bulk seeded simulation -------------------------------------------- #
     def run(self, n: int, seed: Optional[int] = None) -> "SpinSession":
+        """Store every spin (payout + id). O(n) memory — fine up to a few
+        million spins; use `run_stream` for very large n."""
         rng = random.Random(seed)
         payouts: List[float] = []
         ids: List[int] = []
@@ -344,6 +346,34 @@ class RgsSimulator:
             payouts.append(row.payout)
             ids.append(row.id)
         return SpinSession(payouts=payouts, ids=ids, cost=self.cost, n=n)
+
+    # ---- streaming simulation (O(1) memory) -------------------------------- #
+    def run_stream(self, n: int, seed: Optional[int] = None,
+                   progress_every: int = 0, on_progress=None) -> dict:
+        """Simulate n spins accumulating online statistics only (no per-spin
+        storage), so hundreds of millions of spins fit in constant memory.
+        Returns the same metrics dict shape as SpinSession.metrics()."""
+        rng = random.Random(seed)
+        randrange = rng.randrange
+        bl = bisect_left
+        cum = self._cum
+        rows = self.rows
+        tw = self.total_w
+        total = 0.0
+        total_sq = 0.0
+        hits = 0
+        mx = 0.0
+        for i in range(1, n + 1):
+            p = rows[bl(cum, randrange(tw) + 1)].payout
+            total += p
+            total_sq += p * p
+            if p > 0.0:
+                hits += 1
+                if p > mx:
+                    mx = p
+            if progress_every and on_progress and i % progress_every == 0:
+                on_progress(i, total, total_sq, hits, mx)
+        return _session_metrics(n, self.cost, total, total_sq, hits, mx)
 
     # ---- provably-fair single spin ----------------------------------------- #
     def spin_pf(self, server_seed: str, client_seed: str, nonce: int) -> WeightRow:
@@ -355,6 +385,33 @@ class RgsSimulator:
         return self._select(draw)
 
 
+def _session_metrics(n: int, cost: float, total_win: float, total_sq: float,
+                     hits: int, mx: float) -> dict:
+    """Build the metrics dict from accumulated sums (shared by stored & streamed
+    simulation so both report identical fields)."""
+    total_bet = n * cost
+    mean = total_win / n if n else 0.0
+    var = max((total_sq / n - mean * mean) if n else 0.0, 0.0)
+    std = math.sqrt(var)
+    rtp = mean / cost
+    se = (std / math.sqrt(n) / cost) if n else 0.0   # standard error of RTP
+    return {
+        "spins": n,
+        "cost": cost,
+        "total_bet": total_bet,
+        "total_won": total_win,
+        "net": total_win - total_bet,
+        "rtp": rtp,
+        "rtp_pct": rtp * 100.0,
+        "rtp_stderr_pct": se * 100.0,
+        "rtp_ci95_pct": (max(rtp - 1.96 * se, 0) * 100.0, (rtp + 1.96 * se) * 100.0),
+        "mean_multiplier": mean,
+        "std_multiplier": std,
+        "hit_rate_any": hits / n if n else 0.0,
+        "max_multiplier": mx,
+    }
+
+
 @dataclass
 class SpinSession:
     payouts: List[float]
@@ -363,33 +420,11 @@ class SpinSession:
     n: int
 
     def metrics(self) -> dict:
-        n = self.n
-        cost = self.cost
-        total_bet = n * cost
-        total_win = sum(self.payouts)
-        mean = total_win / n if n else 0.0
-        var = (sum(p * p for p in self.payouts) / n - mean * mean) if n else 0.0
-        var = max(var, 0.0)
-        std = math.sqrt(var)
-        wins = sum(1 for p in self.payouts if p > 0)
-        rtp = mean / cost
-        # standard error of the empirical RTP estimate.
-        se = (std / math.sqrt(n) / cost) if n else 0.0
-        return {
-            "spins": n,
-            "cost": cost,
-            "total_bet": total_bet,
-            "total_won": total_win,
-            "net": total_win - total_bet,
-            "rtp": rtp,
-            "rtp_pct": rtp * 100.0,
-            "rtp_stderr_pct": se * 100.0,
-            "rtp_ci95_pct": (max(rtp - 1.96 * se, 0) * 100.0, (rtp + 1.96 * se) * 100.0),
-            "mean_multiplier": mean,
-            "std_multiplier": std,
-            "hit_rate_any": wins / n if n else 0.0,
-            "max_multiplier": max(self.payouts) if self.payouts else 0.0,
-        }
+        total = sum(self.payouts)
+        total_sq = sum(p * p for p in self.payouts)
+        hits = sum(1 for p in self.payouts if p > 0)
+        mx = max(self.payouts) if self.payouts else 0.0
+        return _session_metrics(self.n, self.cost, total, total_sq, hits, mx)
 
 
 # --------------------------------------------------------------------------- #
