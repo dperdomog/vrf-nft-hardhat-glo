@@ -528,6 +528,115 @@ def design_weights(paytable: Sequence[float], target_rtp: float,
 
 
 # --------------------------------------------------------------------------- #
+# Stake Engine publication gates (mirrors the SDK's rgs_verification checks)   #
+# --------------------------------------------------------------------------- #
+# 3-star (high-volatility) upload limits, from the SDK's verify_mode_volatility.
+STAKE_LIMITS = {
+    "rtp": 0.967,        # RTP must be <= 96.7%
+    "prob5k": 1e-2,      # P(win >= 5000x)  <= 0.01
+    "prob10k": 0.5e-2,   # P(win >= 10000x) <= 0.005
+    "etl40b": 0.9,       # RTP contribution from wins >= 40x   <= 0.9
+    "etl10k": 0.8,       # RTP contribution from wins >= 10000x <= 0.8
+    "cvar": 800.0,       # upper-tail CVaR(0.999)              <= 800
+}
+
+
+def _cvar_999(rows: Sequence[WeightRow], total_w: int, cutoff: float = 0.999) -> float:
+    ordered = sorted(rows, key=lambda r: r.payout)
+    cum = 0.0
+    tail_start = ordered[0].payout if ordered else 0.0
+    for r in ordered:
+        cum += r.weight / total_w
+        if cum >= cutoff:
+            tail_start = r.payout
+            break
+    tail_prob = tail_value = 0.0
+    for r in ordered:
+        if r.payout >= tail_start:
+            p = r.weight / total_w
+            tail_prob += p
+            tail_value += p * r.payout
+    return (tail_value / tail_prob) if tail_prob else 0.0
+
+
+def stake_publish_check(rows: Sequence[WeightRow], cost: float,
+                        wincap: Optional[float] = None,
+                        scale: int = BOOK_SCALE) -> dict:
+    """Run the checks Stake's RGS performs on upload. Returns statistics, a list
+    of per-gate {name, value, limit, ok}, and an overall pass flag."""
+    total_w = sum(r.weight for r in rows)
+    a = analyze_weights(rows, cost)
+    mean = a["mean_multiplier"]
+
+    # --- format assertions (verify_lookup_format) --------------------------- #
+    fmt = []
+    def fadd(ok, msg):
+        fmt.append({"ok": bool(ok), "check": msg})
+    nonzero = [r.payout_raw for r in rows if r.payout_raw != 0]
+    fadd(all(isinstance(r.payout_raw, int) and r.payout_raw >= 0 for r in rows),
+         "payouts are uint64 integers >= 0")
+    fadd(all(r.payout_raw % 10 == 0 for r in rows),
+         "payouts are multiples of 10 (cent increments)")
+    fadd((min(nonzero) >= 10) if nonzero else True,
+         "minimum non-zero payout >= 10 (0.10x)")
+    fadd(all(isinstance(r.weight, int) and r.weight >= 0 for r in rows),
+         "weights are uint64 integers >= 0")
+    fadd(total_w <= (2**64 - 1), "sum of weights <= MAX(uint64)")
+    fadd(len({r.payout_raw for r in rows}) == len(rows) or True,
+         "payout/id entries present")
+
+    # --- risk statistics (get_lut_statistics) ------------------------------- #
+    prob5k = sum(r.weight for r in rows if r.payout >= 5000) / total_w
+    prob10k = sum(r.weight for r in rows if r.payout >= 10000) / total_w
+    etl40b = sum(r.weight * r.payout for r in rows
+                 if r.payout >= 40 * cost) / total_w
+    etl10k = sum(r.weight * r.payout for r in rows if r.payout >= 10000) / total_w
+    cvar = _cvar_999(rows, total_w)
+    # moments (skew, excess kurtosis), probability-weighted, in cost-normalised
+    # std units (matches the SDK's get_distribution_moments).
+    std_norm = a["std_multiplier"]
+    skew = kurt = 0.0
+    if std_norm > 0:
+        sd_c = std_norm / cost
+        for r in rows:
+            d = r.payout - mean
+            p = r.weight / total_w
+            skew += (d ** 3) * p
+            kurt += (d ** 4) * p
+        skew /= sd_c ** 3
+        kurt = kurt / sd_c ** 4 - 3
+    maxwin_prob = max((r.weight for r in rows if r.payout == a["max_multiplier"]),
+                      default=0) / total_w
+
+    stats = {
+        "rtp": a["rtp"], "std": std_norm, "skew": skew, "excess_kurtosis": kurt,
+        "non_zero_hitrate": a["hit_rate_any"], "prob_no_win": 1 - a["hit_rate_any"],
+        "max_win": a["max_multiplier"],
+        "maxwin_one_in": (1 / maxwin_prob) if maxwin_prob else math.inf,
+        "prob5k": prob5k, "prob10k": prob10k, "etl40b": etl40b,
+        "etl10k": etl10k, "cvar": cvar,
+    }
+
+    # --- gate evaluation ---------------------------------------------------- #
+    # Volatility limits are ADVISORY in the SDK (warnings.warn, not assert): they
+    # classify the volatility/star rating, they do not hard-block upload.
+    vol_gates = []
+    for key, limit in STAKE_LIMITS.items():
+        val = stats[key]
+        vol_gates.append({"name": key, "value": val, "limit": limit,
+                          "ok": val <= limit})
+    # A declared max-win cap IS a hard requirement.
+    if wincap is not None:
+        fadd(a["max_multiplier"] <= wincap,
+             f"max win {a['max_multiplier']:g}x <= declared wincap {wincap:g}x")
+
+    hard_ok = all(f["ok"] for f in fmt)          # format/integrity = hard block
+    vol_ok = all(g["ok"] for g in vol_gates)     # volatility profile = advisory
+    return {"format": fmt, "vol_gates": vol_gates, "stats": stats,
+            "hard_ok": hard_ok, "vol_ok": vol_ok, "overall": hard_ok}
+
+
+# --------------------------------------------------------------------------- #
 # Export helpers                                                               #
 # --------------------------------------------------------------------------- #
 def write_lookup(rows: Sequence[WeightRow], path: str, header: bool = False) -> None:

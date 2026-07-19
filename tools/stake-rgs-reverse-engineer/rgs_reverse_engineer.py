@@ -18,6 +18,7 @@ Subcommands
   design      Build a lookUpTable that hits a target RTP / hit-rate from a paytable.
   build       Assemble a full custom multi-mode game from a JSON mode spec.
   demo        Generate a synthetic Stake game, then analyze + reverse it end-to-end.
+  publish-check Run Stake's RGS upload gates (format asserts + volatility limits).
   verify      Prove the theoretical math matches simulated spins within tolerance.
 
 Run `python3 rgs_reverse_engineer.py <subcommand> -h` for options.
@@ -305,6 +306,36 @@ def cmd_build(args) -> None:
     print(f"  analyse it with:  analyze --index {outdir}/index.json")
 
 
+def cmd_publish_check(args) -> None:
+    modes = resolve_modes(args)
+    all_ok = True
+    for m in modes:
+        r = core.stake_publish_check(m.weights, m.cost, wincap=args.wincap,
+                                     scale=args.scale)
+        s = r["stats"]
+        print(f"\n=== Stake publication check: mode {m.name!r} (cost {m.cost:g}x) ===")
+        print("  HARD gates — format/integrity (RGS asserts these; failure blocks upload):")
+        for f in r["format"]:
+            print(f"    [{'PASS' if f['ok'] else 'FAIL'}] {f['check']}")
+        print("  ADVISORY — 3-star volatility limits (SDK warns; classifies the rating):")
+        for g in r["vol_gates"]:
+            print(f"    [{' OK ' if g['ok'] else 'WARN'}] {g['name']:<16} "
+                  f"= {g['value']:<12.5g} limit <= {g['limit']}")
+        print("  math stat sheet (PAR evidence):")
+        print(f"    RTP {s['rtp']*100:.4f}%   std {s['std']:.3f}   skew {s['skew']:,.2f}"
+              f"   exc.kurtosis {s['excess_kurtosis']:,.2f}")
+        print(f"    hit rate {s['non_zero_hitrate']*100:.4f}%   max win "
+              f"{s['max_win']:,.2f}x (1 in {s['maxwin_one_in']:,.0f})")
+        print(f"    tail: P(>=5000x) {s['prob5k']:.2e}  P(>=10000x) {s['prob10k']:.2e}"
+              f"  CVaR(99.9%) {s['cvar']:.2f}")
+        star = "meets 3-star profile" if r["vol_ok"] else "exceeds 3-star limits (higher-vol class / needs sign-off)"
+        print(f"  RESULT: {'UPLOADABLE' if r['overall'] else 'BLOCKED — fix hard gates'}"
+              f"  |  volatility: {star}")
+        all_ok = all_ok and r["overall"]
+    print(f"\n==> Hard gates: {'ALL MODES UPLOADABLE' if all_ok else 'BLOCKED — format/integrity failures'}")
+    sys.exit(0 if all_ok else 1)
+
+
 def cmd_verify(args) -> None:
     modes = resolve_modes(args)
     m = modes[0]
@@ -393,6 +424,12 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("spec", help="JSON file: {game, modes:[{name,cost,rtp,hit,paytable}]}")
     b.add_argument("--out-dir", default="custom_game")
     b.set_defaults(func=cmd_build)
+
+    pc = sub.add_parser("publish-check",
+                        help="run Stake's RGS upload gates (format + volatility limits)")
+    add_source(pc)
+    pc.add_argument("--wincap", type=float, help="declared max-win cap to enforce")
+    pc.set_defaults(func=cmd_publish_check)
 
     v = sub.add_parser("verify", help="theoretical vs simulated RTP within tolerance")
     add_source(v)
