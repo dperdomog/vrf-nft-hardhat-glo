@@ -1,0 +1,17 @@
+{
+  "game": "metagaming-coins-and-cauldrons (spec-matched replica)",
+  "modes": [
+    {"name": "base",          "cost": 1.0,   "rtp": 0.9601, "hit": 0.22,
+     "paytable": [0.1,0.5,1,2,3.5,6,10,25,100,500,2000,10000,50000]},
+    {"name": "double_chance", "cost": 2.0,   "rtp": 0.9601, "hit": 0.22,
+     "paytable": [0.1,0.5,1,2,3.5,6,10,25,100,500,2000,10000,50000]},
+    {"name": "multi_spin",    "cost": 8.0,   "rtp": 0.9601, "hit": 0.55,
+     "paytable": [1,2,5,10,25,50,100,250,500,2000,10000,50000]},
+    {"name": "bonus",         "cost": 100.0, "rtp": 0.9601, "hit": 0.99,
+     "paytable": [5,10,25,50,100,250,500,1000,2500,10000,50000]},
+    {"name": "super_bonus",   "cost": 200.0, "rtp": 0.9601, "hit": 0.995,
+     "paytable": [10,25,50,100,250,500,1000,2500,10000,50000]},
+    {"name": "mystery_bonus", "cost": 500.0, "rtp": 0.9601, "hit": 1.0, "decay": 0.5,
+     "paytable": [50,100,250,500,1000,2500,5000,25000,50000]}
+  ]
+}
